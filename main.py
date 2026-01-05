@@ -27,7 +27,7 @@ DATA_FILE = (
     "astrbot_plugin_executive_hangar_time",
     "huangpixu",
     "查询星际公民行政机库时间。",
-    "1.1.4",
+    "1.1.5",
     "https://github.com/huangpixu/astrbot_plugin_executive_hangar_time.git",
 )
 class ExecutiveHangarTime(Star):
@@ -36,7 +36,6 @@ class ExecutiveHangarTime(Star):
         super().__init__(context)
 
     async def initialize(self):
-        """插件初始化：若文件不存在，创建一个"""
         if not DATA_FILE.exists():
             now = datetime.now(timezone.utc).astimezone()
             DATA_FILE.write_text(
@@ -66,25 +65,16 @@ class ExecutiveHangarTime(Star):
         )
 
     # ======================
-    # 核心逻辑：
-    # 从【当前时间】开始生成 N 个连续区间
+    # 从【当前时间】开始生成 N 个区间
     # ======================
-    def _generate_next_ranges(
-        self,
-        initial_time: datetime,
-        count: int = 15,
-    ):
+    def _generate_next_ranges(self, initial_time: datetime, count: int = 10):
         now = datetime.now().astimezone()
 
-        # 计算当前时间到 initial_time 已经过了多少周期
         elapsed = now - initial_time
         cycles = elapsed // CYCLE_DURATION
-
-        # 找到当前周期的起点
         cursor = initial_time + cycles * CYCLE_DURATION
 
-        # 如果当前时间还在当前开启周期内，cursor 保持不变
-        # 如果当前时间在关闭周期内，则 cursor 移到下一个开启
+        # 如果当前已过开启时间，跳到下一个周期
         if now > cursor + OPEN_DURATION:
             cursor += CYCLE_DURATION
 
@@ -99,26 +89,28 @@ class ExecutiveHangarTime(Star):
         return ranges
 
     # ======================
-    # 指令：行政机库时间
+    # 指令：行政机库时间（图片）
     # ======================
     @filter.command("行政机库时间")
     async def executive_hangar_time(self, event: AstrMessageEvent):
         try:
             initial_time = self._load_initial_time()
+            ranges = self._generate_next_ranges(initial_time, count=10)
 
-            ranges = self._generate_next_ranges(
-                initial_time,
-                count=15,
+            lines = ["🟢【开启时间】>>>>>>🔴【关闭时间】\n"]
+            for start, end in ranges:
+                lines.append(f"🟢{start.strftime('%Y/%m/%d %H:%M:%S')}")
+                lines.append(f"🔴{end.strftime('%Y/%m/%d %H:%M:%S')}")
+                lines.append("")
+
+            text = "\n".join(lines)
+
+            # AstrBot 内置：文本转图片
+            img = await self.text_to_image(
+                text
             )
 
-            lines = ["【开启时间】——【关闭时间】"]
-            for start, end in ranges:
-                lines.append(
-                    f"{start.strftime('%Y/%m/%d %H:%M:%S')}——"
-                    f"{end.strftime('%Y/%m/%d %H:%M:%S')}"
-                )
-
-            yield event.plain_result("\n".join(lines))
+            yield event.image_result(img)
 
         except Exception as e:
             logger.exception(e)
@@ -129,10 +121,6 @@ class ExecutiveHangarTime(Star):
     # ======================
     @filter.command("同步行政机库时间")
     async def sync_executive_hangar_time(self, event: AstrMessageEvent):
-        """
-        用法：
-        /同步行政机库时间 2026/1/4 17:35:08
-        """
         msg = event.message_str.strip()
         parts = msg.split(maxsplit=1)
 
