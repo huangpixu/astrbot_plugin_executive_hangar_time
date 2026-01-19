@@ -34,6 +34,7 @@ class ExecutiveHangarTime(Star):
 
     def __init__(self, context: Context):
         super().__init__(context)
+        self._text_image_warmed = False
 
     async def initialize(self):
         if not DATA_FILE.exists():
@@ -94,6 +95,13 @@ class ExecutiveHangarTime(Star):
     @filter.command("行政机库时间")
     async def executive_hangar_time(self, event: AstrMessageEvent):
         try:
+            if not self._text_image_warmed:
+                try:
+                    await self.text_to_image("init")
+                    self._text_image_warmed = True
+                except Exception as e:
+                    logger.exception(e)
+
             initial_time = self._load_initial_time()
             ranges = self._generate_next_ranges(initial_time, count=10)
 
@@ -104,13 +112,11 @@ class ExecutiveHangarTime(Star):
                 lines.append("")
 
             text = "\n".join(lines)
-
-            # AstrBot 内置：文本转图片
-            img = await self.text_to_image(
-                text
-            )
-
-            yield event.image_result(img)
+            img = await self.text_to_image(text)
+            if not img:
+                yield event.plain_result(text)
+            else:
+                yield event.image_result(img)
 
         except Exception as e:
             logger.exception(e)
