@@ -94,6 +94,9 @@ class ExecutiveHangarTime(Star):
     # ======================
     @filter.command("行政机库时间")
     async def executive_hangar_time(self, event: AstrMessageEvent):
+        # 先回复“正在生成中”
+        yield event.plain_result("⏳ 正在计算并生成时间表，请稍候...")
+        
         try:
             if not self._text_image_warmed:
                 try:
@@ -112,10 +115,15 @@ class ExecutiveHangarTime(Star):
                 lines.append("")
 
             text = "\n".join(lines)
+            logger.debug(f"[hangar_time] generating image for text (len={len(text)}): {repr(text)}")
+            
             img = await self.text_to_image(text)
+            
             if not img:
+                logger.warning("[hangar_time] text_to_image returned None/empty.")
                 yield event.plain_result(text)
             else:
+                logger.debug(f"[hangar_time] text_to_image success. type={type(img)}")
                 yield event.image_result(img)
 
         except Exception as e:
