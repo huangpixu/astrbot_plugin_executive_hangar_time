@@ -27,7 +27,7 @@ DATA_FILE = (
     "astrbot_plugin_executive_hangar_time",
     "huangpixu",
     "查询星际公民行政机库时间。",
-    "1.1.5",
+    "1.1.6",
     "https://github.com/huangpixu/astrbot_plugin_executive_hangar_time.git",
 )
 class ExecutiveHangarTime(Star):
