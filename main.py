@@ -105,7 +105,7 @@ class ExecutiveHangarTime(Star):
             for start, end in ranges:
                 lines.append(f"🟢{start.strftime('%Y/%m/%d %H:%M:%S')} 🔴{end.strftime('%Y/%m/%d %H:%M:%S')}")
                 # lines.append(f"🔴{end.strftime('%Y/%m/%d %H:%M:%S')}")
-                # lines.append("")
+                lines.append("")
 
             text = "\n".join(lines)
             logger.debug(f"[hangar_time] generating image for text (len={len(text)}): {repr(text)}")
