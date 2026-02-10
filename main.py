@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register, StarTools
 from astrbot.api import logger
+from .text_to_img import text_to_image
 
 
 # ======================
@@ -27,14 +28,13 @@ DATA_FILE = (
     "astrbot_plugin_executive_hangar_time",
     "huangpixu",
     "查询星际公民行政机库时间。",
-    "1.1.6",
+    "1.1.7",
     "https://github.com/huangpixu/astrbot_plugin_executive_hangar_time.git",
 )
 class ExecutiveHangarTime(Star):
 
     def __init__(self, context: Context):
         super().__init__(context)
-        self._text_image_warmed = False
 
     async def initialize(self):
         if not DATA_FILE.exists():
@@ -98,13 +98,6 @@ class ExecutiveHangarTime(Star):
         yield event.plain_result("⏳ 正在计算并生成时间表，请稍候...")
         
         try:
-            if not self._text_image_warmed:
-                try:
-                    await self.text_to_image("init")
-                    self._text_image_warmed = True
-                except Exception as e:
-                    logger.exception(e)
-
             initial_time = self._load_initial_time()
             ranges = self._generate_next_ranges(initial_time, count=10)
 
@@ -117,7 +110,7 @@ class ExecutiveHangarTime(Star):
             text = "\n".join(lines)
             logger.debug(f"[hangar_time] generating image for text (len={len(text)}): {repr(text)}")
             
-            img = await self.text_to_image(text)
+            img = text_to_image(text, StarTools.get_data_dir("astrbot_plugin_executive_hangar_time"))
             
             if not img:
                 logger.warning("[hangar_time] text_to_image returned None/empty.")
