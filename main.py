@@ -101,11 +101,11 @@ class ExecutiveHangarTime(Star):
             initial_time = self._load_initial_time()
             ranges = self._generate_next_ranges(initial_time, count=10)
 
-            lines = ["🟢【开启时间】>>>>>>🔴【关闭时间】\n"]
+            lines = ["🟢【开启时间】>>>>>> 🔴【关闭时间】\n"]
             for start, end in ranges:
-                lines.append(f"🟢{start.strftime('%Y/%m/%d %H:%M:%S')}")
-                lines.append(f"🔴{end.strftime('%Y/%m/%d %H:%M:%S')}")
-                lines.append("")
+                lines.append(f"🟢{start.strftime('%Y/%m/%d %H:%M:%S')} 🔴{end.strftime('%Y/%m/%d %H:%M:%S')}")
+                # lines.append(f"🔴{end.strftime('%Y/%m/%d %H:%M:%S')}")
+                # lines.append("")
 
             text = "\n".join(lines)
             logger.debug(f"[hangar_time] generating image for text (len={len(text)}): {repr(text)}")
