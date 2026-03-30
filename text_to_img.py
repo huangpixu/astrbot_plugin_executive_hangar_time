@@ -44,7 +44,7 @@ def get_font(size: int, data_dir: Path):
 
     # If system font not found, look for local font in data_dir
     font_filename = "NotoSansCJKsc-Regular.otf"
-    font_path = data_dir / "fonts" / font_filename
+    font_path = data_dir / font_filename
     
     if not font_path.exists():
         # Try to download
