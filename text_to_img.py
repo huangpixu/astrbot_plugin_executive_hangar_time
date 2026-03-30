@@ -204,7 +204,7 @@ def members_to_image(members: list, save_dir: Path) -> str:
         stars_str = "★" * stars if stars > 0 else ""
         
         if is_hidden:
-            line_text = f"{idx}. 隐藏成员"
+            line_text = f"{idx}. (隐藏成员) - "
             color = "gray"
         else:
             rank_display = f"{rank} {stars_str}".strip()

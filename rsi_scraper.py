@@ -58,8 +58,8 @@ async def fetch_org_members(symbol: str = "GFHB"):
                         # Let's extract the title or info section
                         info_div = item.find("div", class_="info")
                         
-                        moniker = name_span.text.strip() if name_span else "Unknown"
-                        handle = nick_span.text.strip() if nick_span else "Unknown"
+                        moniker = name_span.text.strip() if name_span else ""
+                        handle = nick_span.text.strip() if nick_span else ""
                         
                         # Extract Rank (usually the rank level like 正式成员, 舰长, etc.)
                         rank_span = item.find("span", class_="rank")
@@ -89,8 +89,8 @@ async def fetch_org_members(symbol: str = "GFHB"):
                         # Check for hidden members
                         # Usually hidden members don't have a nick/handle, or they have specific classes
                         is_hidden = False
-                        # If both moniker and handle are 'Unknown', it's definitely a hidden member
-                        if moniker == "Unknown" and handle == "Unknown":
+                        # If both moniker and handle are 'Unknown' or empty, it's definitely a hidden member
+                        if (not moniker or moniker == "Unknown") and (not handle or handle == "Unknown"):
                             is_hidden = True
                         elif not nick_span and not name_span:
                             is_hidden = True
@@ -157,14 +157,14 @@ async def fetch_org_members(symbol: str = "GFHB"):
                 logger.error(f"[RSI Scraper] Error on page {page}: {e}")
                 break
                 
-    # Sort members by hidden status first (hidden at the bottom), then strictly by handle alphabetically.
-    # Note: is_hidden is boolean (False = 0, True = 1), so sorting by it puts True (1) after False (0).
-    # However, if handle is empty string "", it might sort before other strings. Let's make sure hidden members have a fallback string for sorting.
-    for m in members:
-        if m["is_hidden"]:
-            m["sort_key"] = "zzzzzz" # ensure it goes to the end alphabetically
-        else:
-            m["sort_key"] = m["handle"].lower()
-            
-    members.sort(key=lambda x: (x["is_hidden"], x["sort_key"]))
-    return members
+    # Separate hidden and visible members to ensure perfect sorting
+    visible_members = [m for m in members if not m["is_hidden"]]
+    hidden_members = [m for m in members if m["is_hidden"]]
+    
+    # Sort visible members strictly by handle alphabetically
+    visible_members.sort(key=lambda x: x["handle"].lower())
+    
+    # Hidden members have no handle, just append them at the very end
+    final_members = visible_members + hidden_members
+    
+    return final_members
