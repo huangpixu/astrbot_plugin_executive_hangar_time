@@ -168,3 +168,79 @@ def text_to_image(text: str, save_dir: Path) -> str:
     img.save(output_path)
     
     return str(output_path)
+
+def members_to_image(members: list, save_dir: Path) -> str:
+    """
+    Generate an image for the members list.
+    """
+    font_size = 20
+    line_spacing = 8
+    
+    font = get_font(font_size, save_dir)
+    
+    dummy_img = Image.new('RGB', (1, 1))
+    dummy_draw = ImageDraw.Draw(dummy_img)
+    
+    bbox = dummy_draw.textbbox((0, 0), "Hg", font=font)
+    line_height = bbox[3] - bbox[1]
+    line_height = max(line_height, font_size)
+    
+    lines_data = []
+    
+    # Title
+    title_text = f"【鹿港成员名单】 (共 {len(members)} 人)"
+    lines_data.append({"text": title_text, "color": "black", "is_title": True})
+    lines_data.append({"text": "-" * 40, "color": "gray", "is_title": False})
+    
+    for idx, member in enumerate(members, start=1):
+        handle = member.get("handle", "")
+        moniker = member.get("moniker", "")
+        rank = member.get("rank", "")
+        stars = member.get("stars", 0)
+        color_level = member.get("color_level", "black")
+        is_hidden = member.get("is_hidden", False)
+        
+        # Build stars string (e.g. ★★★★★)
+        stars_str = "★" * stars if stars > 0 else ""
+        
+        if is_hidden:
+            line_text = f"{idx}. 隐藏成员"
+            color = "gray"
+        else:
+            rank_display = f"{rank} {stars_str}".strip()
+            line_text = f"{idx}. {handle} ({moniker}) - {rank_display}"
+            if color_level == "red":
+                color = "red"
+            elif color_level == "blue":
+                color = "#0066cc" # Use a nice readable blue
+            else:
+                color = "black"
+            
+        lines_data.append({"text": line_text, "color": color, "is_title": False})
+        
+    max_width = 0
+    for line in lines_data:
+        w = dummy_draw.textlength(line["text"], font=font)
+        max_width = max(max_width, w)
+        
+    padding_x = 40
+    padding_y = 30
+    
+    img_width = int(max_width + 2 * padding_x)
+    img_height = int(len(lines_data) * (line_height + line_spacing) + 2 * padding_y)
+    
+    img = Image.new('RGB', (img_width, img_height), color='#f9f9f9')
+    draw = ImageDraw.Draw(img)
+    
+    current_y = padding_y
+    for line in lines_data:
+        draw.text((padding_x, current_y), line["text"], font=font, fill=line["color"])
+        current_y += line_height + line_spacing
+        
+    if not save_dir.exists():
+        save_dir.mkdir(parents=True, exist_ok=True)
+        
+    output_path = save_dir / "lugang_members.png"
+    img.save(output_path)
+    
+    return str(output_path)

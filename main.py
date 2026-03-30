@@ -4,7 +4,9 @@ from datetime import datetime, timedelta, timezone
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register, StarTools
 from astrbot.api import logger
-from .text_to_img import text_to_image
+from .text_to_img import text_to_image, members_to_image
+from .rsi_scraper import fetch_org_members
+import time
 
 
 # ======================
@@ -19,22 +21,24 @@ CYCLE_DURATION = OPEN_DURATION + CLOSE_DURATION
 # 数据文件
 # ======================
 DATA_FILE = (
-    StarTools.get_data_dir("astrbot_plugin_executive_hangar_time")
+    StarTools.get_data_dir("astrbot_plugin_the_homeward_sail")
     / "hangar_time.json"
 )
 
 
 @register(
-    "astrbot_plugin_executive_hangar_time",
+    "astrbot_plugin_the_homeward_sail",
     "huangpixu",
     "查询星际公民行政机库时间。",
     "1.1.7",
     "https://github.com/huangpixu/astrbot_plugin_executive_hangar_time.git",
 )
-class ExecutiveHangarTime(Star):
+class TheHomewardSail(Star):
 
     def __init__(self, context: Context):
         super().__init__(context)
+        self.members_cache = []
+        self.last_fetch_time = 0
 
     async def initialize(self):
         if not DATA_FILE.exists():
@@ -110,7 +114,7 @@ class ExecutiveHangarTime(Star):
             text = "\n".join(lines)
             logger.debug(f"[hangar_time] generating image for text (len={len(text)}): {repr(text)}")
             
-            img = text_to_image(text, StarTools.get_data_dir("astrbot_plugin_executive_hangar_time"))
+            img = text_to_image(text, StarTools.get_data_dir("astrbot_plugin_the_homeward_sail"))
             
             if not img:
                 logger.warning("[hangar_time] text_to_image returned None/empty.")
@@ -122,6 +126,38 @@ class ExecutiveHangarTime(Star):
         except Exception as e:
             logger.exception(e)
             yield event.plain_result("❌ 查询行政机库时间失败")
+
+    # ======================
+    # 指令：鹿港成员
+    # ======================
+    @filter.command("鹿港成员")
+    async def lugang_members(self, event: AstrMessageEvent):
+        yield event.plain_result("⏳ 正在获取鹿港成员信息并生成图片，请稍候...")
+        
+        try:
+            current_time = time.time()
+            # 1小时缓存
+            if not self.members_cache or current_time - self.last_fetch_time > 3600:
+                members = await fetch_org_members("GFHB")
+                if members:
+                    self.members_cache = members
+                    self.last_fetch_time = current_time
+                else:
+                    if not self.members_cache:
+                        yield event.plain_result("❌ 获取成员信息失败，且无本地缓存。")
+                        return
+            
+            save_dir = StarTools.get_data_dir("astrbot_plugin_the_homeward_sail")
+            img_path = members_to_image(self.members_cache, save_dir)
+            
+            if img_path:
+                yield event.image_result(img_path)
+            else:
+                yield event.plain_result("❌ 生成图片失败。")
+                
+        except Exception as e:
+            logger.exception(e)
+            yield event.plain_result("❌ 获取成员信息发生异常，可能是网络原因。")
 
     # ======================
     # 指令：同步行政机库时间
