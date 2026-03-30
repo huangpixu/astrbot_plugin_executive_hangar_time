@@ -97,7 +97,7 @@ class TheHomewardSail(Star):
     # 指令：行政机库时间（图片）
     # ======================
     @filter.command("行政机库时间")
-    async def executive_hangar_time(self, event: AstrMessageEvent, *args):
+    async def executive_hangar_time(self, event: AstrMessageEvent):
         # 先回复“正在生成中”
         yield event.plain_result("⏳ 正在计算并生成时间表，请稍候...")
         
@@ -131,7 +131,7 @@ class TheHomewardSail(Star):
     # 指令：鹿港成员
     # ======================
     @filter.command("鹿港成员")
-    async def lugang_members(self, event: AstrMessageEvent, *args):
+    async def lugang_members(self, event: AstrMessageEvent):
         yield event.plain_result("⏳ 正在获取鹿港成员信息并生成图片，请稍候...")
         
         try:
@@ -163,7 +163,7 @@ class TheHomewardSail(Star):
     # 指令：同步行政机库时间
     # ======================
     @filter.command("同步行政机库时间")
-    async def sync_executive_hangar_time(self, event: AstrMessageEvent, *args):
+    async def sync_executive_hangar_time(self, event: AstrMessageEvent, time_str: str = ""):
         msg = event.message_str.strip()
         parts = msg.split(maxsplit=1)
 
