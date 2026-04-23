@@ -1,9 +1,11 @@
 import asyncio
 from pathlib import Path
-from rsi_scraper import fetch_org_members
-from text_to_img import members_to_image
+
 
 async def test_run():
+    from rsi_scraper import fetch_org_members
+    from text_to_img import members_to_image
+
     print("正在获取鹿港成员信息，请稍候...")
     members = await fetch_org_members("GFHB")
     

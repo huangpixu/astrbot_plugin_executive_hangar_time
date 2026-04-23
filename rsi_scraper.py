@@ -1,11 +1,17 @@
-import aiohttp
-from bs4 import BeautifulSoup
 import asyncio
 import logging
 
 logger = logging.getLogger("astrbot")
 
-async def fetch_org_members(symbol: str = "GFHB"):
+async def fetch_org_members(
+    symbol: str = "GFHB",
+    pagesize: int = 32,
+    sleep_seconds: float = 0.2,
+    max_pages: int | None = None,
+):
+    import aiohttp
+    from bs4 import BeautifulSoup
+
     url = "https://robertsspaceindustries.com/api/orgs/getOrgMembers"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -23,7 +29,7 @@ async def fetch_org_members(symbol: str = "GFHB"):
             payload = {
                 "symbol": symbol,
                 "search": "",
-                "pagesize": 32,
+                "pagesize": pagesize,
                 "page": page
             }
             
@@ -151,7 +157,10 @@ async def fetch_org_members(symbol: str = "GFHB"):
                         })
                     
                     page += 1
-                    await asyncio.sleep(0.5) # Be polite
+                    if max_pages is not None and page > max_pages:
+                        break
+                    if sleep_seconds > 0:
+                        await asyncio.sleep(sleep_seconds)
                     
             except Exception as e:
                 logger.error(f"[RSI Scraper] Error on page {page}: {e}")

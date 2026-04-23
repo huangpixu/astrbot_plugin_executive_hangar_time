@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import datetime, timedelta, timezone
 
 from astrbot.api.event import filter, AstrMessageEvent
@@ -20,10 +21,9 @@ CYCLE_DURATION = OPEN_DURATION + CLOSE_DURATION
 # ======================
 # 数据文件
 # ======================
-DATA_FILE = (
-    StarTools.get_data_dir("astrbot_plugin_the_homeward_sail")
-    / "hangar_time.json"
-)
+DATA_DIR = StarTools.get_data_dir("astrbot_plugin_the_homeward_sail")
+HANGAR_TIME_FILE = DATA_DIR / "hangar_time.json"
+FLEETS_FILE = DATA_DIR / "fleets.json"
 
 
 @register(
@@ -37,13 +37,17 @@ class TheHomewardSail(Star):
 
     def __init__(self, context: Context):
         super().__init__(context)
-        self.members_cache = []
-        self.last_fetch_time = 0
+        self.members_cache_by_symbol = {}
+        self.last_fetch_time_by_symbol = {}
+        self.fleets = {}
 
     async def initialize(self):
-        if not DATA_FILE.exists():
+        if not DATA_DIR.exists():
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+        if not HANGAR_TIME_FILE.exists():
             now = datetime.now(timezone.utc).astimezone()
-            DATA_FILE.write_text(
+            HANGAR_TIME_FILE.write_text(
                 json.dumps(
                     {"initial_open_time": now.isoformat()},
                     indent=2,
@@ -52,15 +56,23 @@ class TheHomewardSail(Star):
                 encoding="utf-8",
             )
 
+        if not FLEETS_FILE.exists():
+            FLEETS_FILE.write_text(
+                json.dumps({"鹿港": "GFHB"}, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+
+        self._sync_fleets_from_disk()
+
     # ======================
     # 文件读写
     # ======================
     def _load_initial_time(self) -> datetime:
-        data = json.loads(DATA_FILE.read_text(encoding="utf-8"))
+        data = json.loads(HANGAR_TIME_FILE.read_text(encoding="utf-8"))
         return datetime.fromisoformat(data["initial_open_time"])
 
     def _save_initial_time(self, dt: datetime):
-        DATA_FILE.write_text(
+        HANGAR_TIME_FILE.write_text(
             json.dumps(
                 {"initial_open_time": dt.isoformat()},
                 indent=2,
@@ -68,6 +80,163 @@ class TheHomewardSail(Star):
             ),
             encoding="utf-8",
         )
+
+    def _sync_fleets_from_disk(self) -> dict:
+        try:
+            raw = json.loads(FLEETS_FILE.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                fleets = {}
+                for k, v in raw.items():
+                    name = str(k).strip()
+                    symbol = str(v).strip()
+                    if name and symbol:
+                        fleets[name] = symbol
+                self.fleets = fleets
+                return fleets
+        except Exception as e:
+            logger.exception(e)
+        self.fleets = {}
+        return {}
+
+    def _save_fleets_to_disk(self):
+        FLEETS_FILE.write_text(
+            json.dumps(self.fleets, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+    def _resolve_org_symbol(self, fleet_or_symbol: str) -> tuple[str, str] | None:
+        key = (fleet_or_symbol or "").strip()
+        if not key:
+            return None
+
+        if key in self.fleets:
+            return key, self.fleets[key]
+
+        if key.isalnum() and key.upper() == key:
+            return key, key
+
+        return None
+
+    def _members_cache_file(self, symbol: str):
+        safe = re.sub(r"[^A-Za-z0-9_-]+", "_", symbol.strip())
+        return DATA_DIR / f"org_members_cache_{safe}.json"
+
+    def _load_members_cache_from_disk(self, symbol: str) -> tuple[list, float] | None:
+        cache_file = self._members_cache_file(symbol)
+        if not cache_file.exists():
+            return None
+        try:
+            raw = json.loads(cache_file.read_text(encoding="utf-8"))
+            members = raw.get("members")
+            fetched_at = raw.get("fetched_at")
+            if isinstance(members, list) and isinstance(fetched_at, (int, float)):
+                return members, float(fetched_at)
+        except Exception:
+            return None
+        return None
+
+    def _save_members_cache_to_disk(self, symbol: str, members: list, fetched_at: float):
+        cache_file = self._members_cache_file(symbol)
+        cache_file.write_text(
+            json.dumps(
+                {"symbol": symbol, "fetched_at": fetched_at, "members": members},
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+    async def _get_members(self, symbol: str, ttl_seconds: int = 3600) -> tuple[list, str]:
+        now = time.time()
+
+        mem_members = self.members_cache_by_symbol.get(symbol)
+        mem_ts = self.last_fetch_time_by_symbol.get(symbol)
+        if mem_members and isinstance(mem_ts, (int, float)) and now - float(mem_ts) <= ttl_seconds:
+            return mem_members, "memory_fresh"
+
+        disk = self._load_members_cache_from_disk(symbol)
+        if disk:
+            disk_members, disk_ts = disk
+            if disk_members and now - float(disk_ts) <= ttl_seconds:
+                self.members_cache_by_symbol[symbol] = disk_members
+                self.last_fetch_time_by_symbol[symbol] = float(disk_ts)
+                return disk_members, "disk_fresh"
+
+        members = await fetch_org_members(symbol)
+        if members:
+            self.members_cache_by_symbol[symbol] = members
+            self.last_fetch_time_by_symbol[symbol] = now
+            try:
+                self._save_members_cache_to_disk(symbol, members, now)
+            except Exception as e:
+                logger.exception(e)
+            return members, "remote"
+
+        if mem_members:
+            return mem_members, "memory_stale"
+
+        if disk:
+            disk_members, _ = disk
+            if disk_members:
+                return disk_members, "disk_stale"
+
+        return [], "empty"
+
+    async def _send_members_images(
+        self,
+        event: AstrMessageEvent,
+        org_display_name: str,
+        symbol: str,
+        members: list,
+        page: int | None = None,
+        chunk_size: int = 200,
+        max_pages_send: int = 10,
+    ):
+        total = len(members)
+        if total == 0:
+            yield event.plain_result("❌ 未获取到成员信息。")
+            return
+
+        total_pages = (total + chunk_size - 1) // chunk_size
+        save_dir = DATA_DIR
+
+        if page is not None:
+            if page < 1 or page > total_pages:
+                yield event.plain_result(f"❌ 页码超出范围：1 - {total_pages}")
+                return
+            start = (page - 1) * chunk_size
+            end = min(start + chunk_size, total)
+            img_path = members_to_image(
+                members[start:end],
+                save_dir,
+                org_display_name=org_display_name,
+                total_count=total,
+                page=page,
+                total_pages=total_pages,
+                output_filename=f"members_{symbol}_{page}.png",
+            )
+            yield event.image_result(img_path)
+            return
+
+        pages_to_send = min(total_pages, max_pages_send)
+        if total_pages > 1:
+            note = f"共 {total} 人，拆分为 {total_pages} 张图片。"
+            if total_pages > max_pages_send:
+                note += f"\n仅发送前 {max_pages_send} 张，可用：/查成员 {org_display_name} <页码>"
+            yield event.plain_result(note)
+
+        for p in range(1, pages_to_send + 1):
+            start = (p - 1) * chunk_size
+            end = min(start + chunk_size, total)
+            img_path = members_to_image(
+                members[start:end],
+                save_dir,
+                org_display_name=org_display_name,
+                total_count=total,
+                page=p,
+                total_pages=total_pages,
+                output_filename=f"members_{symbol}_{p}.png",
+            )
+            yield event.image_result(img_path)
 
     # ======================
     # 从【当前时间】开始生成 N 个区间
@@ -114,7 +283,7 @@ class TheHomewardSail(Star):
             text = "\n".join(lines)
             logger.debug(f"[hangar_time] generating image for text (len={len(text)}): {repr(text)}")
             
-            img = text_to_image(text, StarTools.get_data_dir("astrbot_plugin_the_homeward_sail"))
+            img = text_to_image(text, DATA_DIR)
             
             if not img:
                 logger.warning("[hangar_time] text_to_image returned None/empty.")
@@ -128,36 +297,126 @@ class TheHomewardSail(Star):
             yield event.plain_result("❌ 查询行政机库时间失败")
 
     # ======================
-    # 指令：鹿港成员
+    # 指令：添加舰队
     # ======================
-    @filter.command("鹿港成员")
-    async def lugang_members(self, event: AstrMessageEvent):
-        yield event.plain_result("⏳ 正在获取鹿港成员信息并生成图片，请稍候...")
-        
+    @filter.command("添加舰队")
+    async def add_fleet(self, event: AstrMessageEvent, mapping: str = ""):
+        raw = (mapping or "").strip()
+        if not raw:
+            msg = event.message_str.strip()
+            parts = msg.split(maxsplit=1)
+            raw = parts[1].strip() if len(parts) == 2 else ""
+
+        if not raw:
+            yield event.plain_result("❌ 用法：添加舰队 鹿港-GFHB")
+            return
+
+        if "-" in raw:
+            name, symbol = raw.split("-", 1)
+        else:
+            parts = raw.split(maxsplit=1)
+            if len(parts) != 2:
+                yield event.plain_result("❌ 用法：添加舰队 鹿港-GFHB")
+                return
+            name, symbol = parts
+
+        name = name.strip()
+        symbol = symbol.strip()
+        if not name or not symbol:
+            yield event.plain_result("❌ 用法：添加舰队 鹿港-GFHB")
+            return
+
+        self.fleets[name] = symbol
         try:
-            current_time = time.time()
-            # 1小时缓存
-            if not self.members_cache or current_time - self.last_fetch_time > 3600:
-                members = await fetch_org_members("GFHB")
-                if members:
-                    self.members_cache = members
-                    self.last_fetch_time = current_time
-                else:
-                    if not self.members_cache:
-                        yield event.plain_result("❌ 获取成员信息失败，且无本地缓存。")
-                        return
-            
-            save_dir = StarTools.get_data_dir("astrbot_plugin_the_homeward_sail")
-            img_path = members_to_image(self.members_cache, save_dir)
-            
-            if img_path:
-                yield event.image_result(img_path)
-            else:
-                yield event.plain_result("❌ 生成图片失败。")
+            self._save_fleets_to_disk()
+        except Exception as e:
+            logger.exception(e)
+            yield event.plain_result("❌ 写入舰队编号文件失败。")
+            return
+
+        yield event.plain_result(f"✅ 已保存舰队：{name} -> {symbol}")
+
+    # ======================
+    # 指令：同步舰队编号
+    # ======================
+    @filter.command("同步舰队编号")
+    async def sync_fleets(self, event: AstrMessageEvent):
+        fleets = self._sync_fleets_from_disk()
+        if not fleets:
+            yield event.plain_result("✅ 已同步舰队编号：当前为空。")
+            return
+
+        preview = list(fleets.items())[:20]
+        lines = [f"✅ 已同步舰队编号：共 {len(fleets)} 个"]
+        lines += [f"- {k} -> {v}" for k, v in preview]
+        if len(fleets) > 20:
+            lines.append("- ...")
+        yield event.plain_result("\n".join(lines))
+
+    # ======================
+    # 指令：查成员（参数形式）
+    # ======================
+    @filter.command("查成员")
+    async def query_members(self, event: AstrMessageEvent, fleet: str = "", page: int | None = None):
+        fleet = (fleet or "").strip()
+        if not fleet:
+            yield event.plain_result("❌ 用法：/查成员 鹿港 [页码]")
+            return
+
+        resolved = self._resolve_org_symbol(fleet)
+        if not resolved:
+            yield event.plain_result("❌ 未找到该舰队编号，请先：添加舰队 鹿港-GFHB")
+            return
+        org_display_name, symbol = resolved
+
+        yield event.plain_result(f"⏳ 正在获取 {org_display_name}({symbol}) 成员信息，请稍候...")
+
+        try:
+            members, source = await self._get_members(symbol, ttl_seconds=3600)
+
+            if source in {"memory_stale", "disk_stale"}:
+                yield event.plain_result("⚠️ 获取最新成员失败，已使用缓存数据。")
+            elif source in {"disk_fresh"}:
+                yield event.plain_result("ℹ️ 已使用本地缓存数据。")
+
+            async for r in self._send_members_images(
+                event,
+                org_display_name=org_display_name,
+                symbol=symbol,
+                members=members,
+                page=page,
+            ):
+                yield r
                 
         except Exception as e:
             logger.exception(e)
             yield event.plain_result("❌ 获取成员信息发生异常，可能是网络原因。")
+
+    # ======================
+    # 指令：查xxx成员（自然语言形式）
+    # ======================
+    @filter.regex(r"^查(.+?)成员$")
+    async def query_members_regex(self, event: AstrMessageEvent):
+        if not (event.is_wake or event.is_at_or_wake_command):
+            return
+
+        m = re.match(r"^查(.+?)成员$", event.message_str.strip())
+        if not m:
+            return
+        fleet = (m.group(1) or "").strip()
+        if not fleet:
+            return
+
+        async for r in self.query_members(event, fleet=fleet):
+            yield r
+
+    # ======================
+    # 指令：鹿港成员（兼容旧命令）
+    # ======================
+    @filter.command("鹿港成员")
+    async def lugang_members(self, event: AstrMessageEvent):
+        async for r in self.query_members(event, fleet="鹿港"):
+            yield r
 
     # ======================
     # 指令：同步行政机库时间

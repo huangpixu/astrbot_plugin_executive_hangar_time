@@ -169,10 +169,15 @@ def text_to_image(text: str, save_dir: Path) -> str:
     
     return str(output_path)
 
-def members_to_image(members: list, save_dir: Path) -> str:
-    """
-    Generate an image for the members list.
-    """
+def members_to_image(
+    members: list,
+    save_dir: Path,
+    org_display_name: str = "鹿港",
+    total_count: int | None = None,
+    page: int = 1,
+    total_pages: int = 1,
+    output_filename: str = "lugang_members.png",
+) -> str:
     font_size = 20
     line_spacing = 8
     
@@ -188,7 +193,11 @@ def members_to_image(members: list, save_dir: Path) -> str:
     lines_data = []
     
     # Title
-    title_text = f"【鹿港成员名单】 (共 {len(members)} 人)"
+    page_suffix = ""
+    if total_pages > 1:
+        page_suffix = f"  第 {page}/{total_pages} 页"
+    count = total_count if total_count is not None else len(members)
+    title_text = f"【{org_display_name}成员名单】 (共 {count} 人){page_suffix}"
     lines_data.append({"text": title_text, "color": "black", "is_title": True})
     lines_data.append({"text": "-" * 40, "color": "gray", "is_title": False})
     
@@ -240,7 +249,7 @@ def members_to_image(members: list, save_dir: Path) -> str:
     if not save_dir.exists():
         save_dir.mkdir(parents=True, exist_ok=True)
         
-    output_path = save_dir / "lugang_members.png"
+    output_path = save_dir / output_filename
     img.save(output_path)
     
     return str(output_path)
