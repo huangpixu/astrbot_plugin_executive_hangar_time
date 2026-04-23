@@ -104,6 +104,90 @@ class TheHomewardSail(Star):
             encoding="utf-8",
         )
 
+    def _build_command_help_text(self, command_name: str = "") -> str:
+        command_name = (command_name or "").strip()
+        helps = {
+            "行政机库时间": (
+                "命令：行政机库时间\n"
+                "作用：查询接下来 10 次行政机库开启/关闭时间。\n"
+                "用法：行政机库时间"
+            ),
+            "同步行政机库时间": (
+                "命令：同步行政机库时间\n"
+                "作用：同步行政机库起始时间，支持手动指定时间。\n"
+                "用法1：同步行政机库时间\n"
+                "用法2：同步行政机库时间 2026/01/04 17:35:08"
+            ),
+            "添加舰队": (
+                "命令：添加舰队\n"
+                "作用：保存舰队名和 RSI 组织编号的映射到文件。\n"
+                "用法1：添加舰队 鹿港-GFHB\n"
+                "用法2：添加舰队 鹿港 GFHB"
+            ),
+            "同步舰队编号": (
+                "命令：同步舰队编号\n"
+                "作用：从文件重新加载全部舰队编号映射。\n"
+                "用法：同步舰队编号"
+            ),
+            "查成员": (
+                "命令：查成员\n"
+                "作用：按舰队名或组织编号查询成员，成员多时自动分页出图。\n"
+                "用法1：查成员 鹿港\n"
+                "用法2：查成员 鹿港 2\n"
+                "用法3：查成员 GFHB"
+            ),
+            "查xxx成员": (
+                "命令：查xxx成员\n"
+                "作用：自然语言方式查询成员。\n"
+                "示例：查鹿港成员"
+            ),
+            "鹿港成员": (
+                "命令：鹿港成员\n"
+                "作用：兼容旧命令，等同于查成员 鹿港。\n"
+                "用法：鹿港成员"
+            ),
+            "查命令": (
+                "命令：查命令\n"
+                "作用：查看全部命令说明，或查看单条命令的用法。\n"
+                "用法1：查命令\n"
+                "用法2：查命令 添加舰队\n"
+                "用法3：查命令 查成员"
+            ),
+        }
+
+        aliases = {
+            "帮助": "查命令",
+            "help": "查命令",
+            "所有命令": "查命令",
+            "成员": "查成员",
+        }
+
+        if command_name:
+            normalized = aliases.get(command_name, command_name)
+            if normalized in helps:
+                return helps[normalized]
+            return (
+                f"❌ 未找到命令：{command_name}\n"
+                "可用：查命令\n"
+                "或：查命令 查成员"
+            )
+
+        ordered = [
+            "查命令",
+            "行政机库时间",
+            "同步行政机库时间",
+            "添加舰队",
+            "同步舰队编号",
+            "查成员",
+            "查xxx成员",
+            "鹿港成员",
+        ]
+        lines = ["可用命令如下："]
+        for name in ordered:
+            lines.append("")
+            lines.append(helps[name])
+        return "\n".join(lines)
+
     def _resolve_org_symbol(self, fleet_or_symbol: str) -> tuple[str, str] | None:
         key = (fleet_or_symbol or "").strip()
         if not key:
@@ -297,6 +381,13 @@ class TheHomewardSail(Star):
             yield event.plain_result("❌ 查询行政机库时间失败")
 
     # ======================
+    # 指令：查命令
+    # ======================
+    @filter.command("查命令")
+    async def show_commands(self, event: AstrMessageEvent, command_name: str = ""):
+        yield event.plain_result(self._build_command_help_text(command_name))
+
+    # ======================
     # 指令：添加舰队
     # ======================
     @filter.command("添加舰队")
@@ -308,7 +399,7 @@ class TheHomewardSail(Star):
             raw = parts[1].strip() if len(parts) == 2 else ""
 
         if not raw:
-            yield event.plain_result("❌ 用法：添加舰队 鹿港-GFHB")
+            yield event.plain_result(self._build_command_help_text("添加舰队"))
             return
 
         if "-" in raw:
@@ -316,14 +407,14 @@ class TheHomewardSail(Star):
         else:
             parts = raw.split(maxsplit=1)
             if len(parts) != 2:
-                yield event.plain_result("❌ 用法：添加舰队 鹿港-GFHB")
+                yield event.plain_result(self._build_command_help_text("添加舰队"))
                 return
             name, symbol = parts
 
         name = name.strip()
         symbol = symbol.strip()
         if not name or not symbol:
-            yield event.plain_result("❌ 用法：添加舰队 鹿港-GFHB")
+            yield event.plain_result(self._build_command_help_text("添加舰队"))
             return
 
         self.fleets[name] = symbol
@@ -360,12 +451,15 @@ class TheHomewardSail(Star):
     async def query_members(self, event: AstrMessageEvent, fleet: str = "", page: int | None = None):
         fleet = (fleet or "").strip()
         if not fleet:
-            yield event.plain_result("❌ 用法：/查成员 鹿港 [页码]")
+            yield event.plain_result(self._build_command_help_text("查成员"))
             return
 
         resolved = self._resolve_org_symbol(fleet)
         if not resolved:
-            yield event.plain_result("❌ 未找到该舰队编号，请先：添加舰队 鹿港-GFHB")
+            yield event.plain_result(
+                "❌ 未找到该舰队编号。\n"
+                f"{self._build_command_help_text('添加舰队')}"
+            )
             return
         org_display_name, symbol = resolved
 
@@ -445,5 +539,5 @@ class TheHomewardSail(Star):
         except ValueError:
             yield event.plain_result(
                 "❌ 时间格式错误\n"
-                "正确示例：/同步行政机库时间 2026/1/4 17:35:08"
+                f"{self._build_command_help_text('同步行政机库时间')}"
             )

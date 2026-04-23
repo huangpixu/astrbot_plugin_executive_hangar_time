@@ -158,6 +158,16 @@ class FleetsAndMembersTests(unittest.IsolatedAsyncioTestCase):
         fleets = plugin2._sync_fleets_from_disk()
         self.assertEqual(fleets["新港"], "NEWH")
 
+    async def test_show_commands_lists_core_commands(self):
+        plugin = _make_plugin(self.main_mod)
+
+        results = [r async for r in plugin.show_commands(FakeEvent("查命令"))]
+        self.assertTrue(results)
+        text = _get_first_plain_text(results[0])
+        self.assertIn("可用命令如下", text)
+        self.assertIn("添加舰队", text)
+        self.assertIn("查成员", text)
+
     async def test_query_members_paginates_images(self):
         plugin = _make_plugin(self.main_mod)
         plugin._sync_fleets_from_disk()
