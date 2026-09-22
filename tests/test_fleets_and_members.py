@@ -3,6 +3,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest import mock
+from zipfile import ZipFile
 
 
 class FakeEvent:
@@ -16,6 +17,9 @@ class FakeEvent:
 
     def image_result(self, url_or_path: str):
         return ("image", url_or_path)
+
+    def chain_result(self, chain: list):
+        return ("chain", chain)
 
 
 def _get_first_plain_text(result) -> str:
@@ -72,6 +76,7 @@ class FleetsAndMembersTests(unittest.IsolatedAsyncioTestCase):
         astrbot_api_mod = types.ModuleType("astrbot.api")
         astrbot_api_event_mod = types.ModuleType("astrbot.api.event")
         astrbot_api_star_mod = types.ModuleType("astrbot.api.star")
+        astrbot_api_message_components_mod = types.ModuleType("astrbot.api.message_components")
 
         astrbot_api_mod.logger = _LoggerStub()
 
@@ -94,10 +99,19 @@ class FleetsAndMembersTests(unittest.IsolatedAsyncioTestCase):
         astrbot_api_star_mod.register = _register_stub
         astrbot_api_star_mod.StarTools = _StarToolsStub
 
+        class _FileStub:
+            def __init__(self, name: str, file: str = "", url: str = ""):
+                self.name = name
+                self.file = file
+                self.url = url
+
+        astrbot_api_message_components_mod.File = _FileStub
+
         sys.modules["astrbot"] = astrbot_mod
         sys.modules["astrbot.api"] = astrbot_api_mod
         sys.modules["astrbot.api.event"] = astrbot_api_event_mod
         sys.modules["astrbot.api.star"] = astrbot_api_star_mod
+        sys.modules["astrbot.api.message_components"] = astrbot_api_message_components_mod
 
         import sys
 
@@ -167,6 +181,7 @@ class FleetsAndMembersTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("可用命令如下", text)
         self.assertIn("添加舰队", text)
         self.assertIn("查成员", text)
+        self.assertIn("导出xxx成员", text)
 
     async def test_query_members_paginates_images(self):
         plugin = _make_plugin(self.main_mod)
@@ -227,5 +242,50 @@ class FleetsAndMembersTests(unittest.IsolatedAsyncioTestCase):
         with mock.patch.object(self.main_mod, "fetch_org_members", new=fake_fetch):
             event = FakeEvent("查鹿港成员", is_wake=False, is_at=False)
             results = [r async for r in plugin.query_members_regex(event)]
+
+        self.assertEqual(results, [])
+
+    async def test_export_members_regex_generates_excel(self):
+        plugin = _make_plugin(self.main_mod)
+        plugin._sync_fleets_from_disk()
+
+        async def fake_fetch(symbol: str, *args, **kwargs):
+            return [
+                {
+                    "handle": "pilot-one",
+                    "moniker": "飞行员一号",
+                    "rank": "正式成员",
+                    "stars": 2,
+                    "is_hidden": False,
+                },
+                {
+                    "handle": "",
+                    "moniker": "",
+                    "rank": "",
+                    "stars": 0,
+                    "is_hidden": True,
+                },
+            ]
+
+        with mock.patch.object(self.main_mod, "fetch_org_members", new=fake_fetch):
+            event = FakeEvent("导出鹿港成员")
+            results = [r async for r in plugin.export_members_regex(event)]
+
+        chain_result = next(result for result in results if result[0] == "chain")
+        file_component = chain_result[1][0]
+        self.assertEqual(file_component.name, "鹿港成员名单.xlsx")
+        self.assertTrue(Path(file_component.file).exists())
+        with ZipFile(file_component.file) as workbook:
+            self.assertEqual(workbook.testzip(), None)
+            sheet = workbook.read("xl/worksheets/sheet1.xml").decode("utf-8")
+        self.assertIn("pilot-one", sheet)
+        self.assertIn("飞行员一号", sheet)
+        self.assertIn("是否隐藏", sheet)
+
+    async def test_export_members_regex_requires_wake(self):
+        plugin = _make_plugin(self.main_mod)
+        event = FakeEvent("导出鹿港成员", is_wake=False, is_at=False)
+
+        results = [r async for r in plugin.export_members_regex(event)]
 
         self.assertEqual(results, [])

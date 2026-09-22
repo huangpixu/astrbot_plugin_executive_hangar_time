@@ -3,8 +3,10 @@ import re
 from datetime import datetime, timedelta, timezone
 
 from astrbot.api.event import filter, AstrMessageEvent
+from astrbot.api.message_components import File
 from astrbot.api.star import Context, Star, register, StarTools
 from astrbot.api import logger
+from .excel_export import members_to_excel
 from .text_to_img import text_to_image, members_to_image
 from .rsi_scraper import fetch_org_members
 import time
@@ -30,7 +32,7 @@ FLEETS_FILE = DATA_DIR / "fleets.json"
     "astrbot_plugin_the_homeward_sail",
     "huangpixu",
     "查询星际公民行政机库时间。",
-    "1.1.7",
+    "1.1.8",
     "https://github.com/huangpixu/astrbot_plugin_executive_hangar_time.git",
 )
 class TheHomewardSail(Star):
@@ -141,6 +143,11 @@ class TheHomewardSail(Star):
                 "作用：自然语言方式查询成员。\n"
                 "示例：查鹿港成员"
             ),
+            "导出xxx成员": (
+                "命令：导出xxx成员\n"
+                "作用：自然语言方式导出完整成员名单 Excel 表格。\n"
+                "示例：导出鹿港成员"
+            ),
             "鹿港成员": (
                 "命令：鹿港成员\n"
                 "作用：兼容旧命令，等同于查成员 鹿港。\n"
@@ -180,6 +187,7 @@ class TheHomewardSail(Star):
             "同步舰队编号",
             "查成员",
             "查xxx成员",
+            "导出xxx成员",
             "鹿港成员",
         ]
         lines = ["可用命令如下："]
@@ -503,6 +511,58 @@ class TheHomewardSail(Star):
 
         async for r in self.query_members(event, fleet=fleet):
             yield r
+
+    # ======================
+    # 指令：导出xxx成员（Excel）
+    # ======================
+    @filter.regex(r"^导出(.+?)成员$")
+    async def export_members_regex(self, event: AstrMessageEvent):
+        if not (event.is_wake or event.is_at_or_wake_command):
+            return
+
+        matched = re.match(r"^导出(.+?)成员$", event.message_str.strip())
+        if not matched:
+            return
+        fleet = (matched.group(1) or "").strip()
+        if not fleet:
+            return
+
+        resolved = self._resolve_org_symbol(fleet)
+        if not resolved:
+            yield event.plain_result(
+                "❌ 未找到该舰队编号。\n"
+                f"{self._build_command_help_text('添加舰队')}"
+            )
+            return
+        org_display_name, symbol = resolved
+
+        yield event.plain_result(f"⏳ 正在导出 {org_display_name}({symbol}) 成员信息，请稍候...")
+
+        try:
+            members, source = await self._get_members(symbol, ttl_seconds=3600)
+            if not members:
+                yield event.plain_result("❌ 未获取到成员信息。")
+                return
+
+            if source in {"memory_stale", "disk_stale"}:
+                yield event.plain_result("⚠️ 获取最新成员失败，已使用缓存数据。")
+            elif source == "disk_fresh":
+                yield event.plain_result("ℹ️ 已使用本地缓存数据。")
+
+            safe_symbol = re.sub(r"[^A-Za-z0-9_-]+", "_", symbol.strip())
+            output_path = members_to_excel(
+                members,
+                DATA_DIR,
+                org_display_name=org_display_name,
+                output_filename=f"members_{safe_symbol}.xlsx",
+            )
+            download_name = re.sub(r'[\\/:*?"<>|]+', "_", org_display_name).strip() or safe_symbol
+            yield event.chain_result(
+                [File(name=f"{download_name}成员名单.xlsx", file=output_path)]
+            )
+        except Exception as e:
+            logger.exception(e)
+            yield event.plain_result("❌ 导出成员信息发生异常，可能是网络或文件生成原因。")
 
     # ======================
     # 指令：鹿港成员（兼容旧命令）
